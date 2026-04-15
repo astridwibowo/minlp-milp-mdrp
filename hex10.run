@@ -1,0 +1,297 @@
+reset;
+model hex10.mod;
+data  hex10.dat;
+
+option show_stats 1;
+
+# temp scalars for printing/reconstruction
+param tl_tmp integer;
+param tr_tmp integer;
+param q1_tmp integer default -1;
+param r1_tmp integer default -1;
+param q2_tmp integer default -1;
+param r2_tmp integer default -1;
+param tol default 1e-6;
+
+option solver gurobi;
+option gurobi_options 'outlev=1 timelim=3600';
+solve;
+
+# ================== LAUNCH / RETRIEVE (TMSET) ==================
+printf "=== DRONE LAUNCHES ===\n";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, t in TMSET: s[i,o,q,r,t] > 0.5}
+  printf "%s launch at (%d,%d) t=%d\n", i, q, r, t;
+
+printf "=== DRONE RETRIEVES ===\n";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, t in TMSET: f[i,o,q,r,t] > 0.5}
+  printf "%s retrieve at (%d,%d) t=%d\n", i, q, r, t;
+
+# ================== MOTHERSHIP ROUTE (TMSET) ==================
+printf "\nMothership Route:\n";
+for {t in TMSET} {
+   printf "t=%2d : ", t;
+   printf { (q,r) in GRID: ypos[q,r,t] > 0.5 } "(%d,%d)\n", q, r;
+}
+
+printf "\nTargets visited by mothership (1 if yes):\n";
+for {(q,r) in TARGETS} {
+    printf "(%d,%d) : %d\n", q, r,
+        (if sum {t in TMSET} ypos[q,r,t] >= 1 then 1 else 0);
+}
+
+# ================== SAVE SNAPSHOTS ==================
+display s > s.txt;
+display f > f.txt;
+
+printf "\n=== MOTHERSHIP ===\n";
+display ypos > ypos.txt;
+display TARGETS > targets.txt;
+
+
+
+printf "drone,op,m,q1,r1,q2,r2,tm_est\n" > "xarc_from_ampl.csv";
+for {i in DRONES, o in OPERATIONS, (q1,r1,q2,r2) in ARCS, m in TDSET: m < TDmax} {
+  if xarc[i,o,q1,r1,q2,r2,m] >= 0.5 then {
+
+    printf "%s,%d,%d,%d,%d,%d,%d,%d\n",
+      i, o, m, q1, r1, q2, r2,
+      floor( t_l[i,o] + ((m-1) * Delta_u[i] / Delta_m) + 0.5 )
+      >> "xarc_from_ampl.csv";
+  }
+}
+
+
+printf "\n=== DRONE TIMING VARS ===\n";
+display t_l, t_r;
+
+
+display {i in DRONES, o in OPERATIONS, (q,r) in TARGETS: x[i,o,q,r] > 0.5} (i, o, q, r, x[i,o,q,r]);
+
+
+printf "drone,op,t,q1,r1,q2,r2\n" > "routes.csv";
+printf "drone,op,tr,q,r\n"        > "retrieve_points.csv";
+
+for {i in DRONES, o in OPERATIONS: h[i,o] = 1} {
+
+ 
+  let tl_tmp := floor(t_l[i,o] + 0.5);
+  let tr_tmp := floor(t_r[i,o] + 0.5);
+
+  printf "%s %d :", i, o;
+
+  
+  for {t in tl_tmp..tr_tmp-1} {
+
+   
+    for {m in TDSET: m = 1 + (t - tl_tmp) and m < TDmax} {
+
+      let q1_tmp := -1; let r1_tmp := -1;
+      let q2_tmp := -1; let r2_tmp := -1;
+
+      
+      for {(q,r) in GRID: z[i,o,q,r,m] >= 0.9} { let q1_tmp := q; let r1_tmp := r; break; }
+      if q1_tmp < 0 then
+        for {(q,r) in GRID: z[i,o,q,r,m] >= 0.5} { let q1_tmp := q; let r1_tmp := r; break; }
+
+      
+      for {(q,r) in GRID: z[i,o,q,r,m+1] >= 0.9} { let q2_tmp := q; let r2_tmp := r; break; }
+      if q2_tmp < 0 then
+        for {(q,r) in GRID: z[i,o,q,r,m+1] >= 0.5} { let q2_tmp := q; let r2_tmp := r; break; }
+
+      if (q1_tmp >= 0 and q2_tmp >= 0) then
+        printf "%s,%d,%d,%d,%d,%d,%d\n", i, o, t, q1_tmp, r1_tmp, q2_tmp, r2_tmp >> "routes.csv";
+    }
+  }
+
+  for {(q,r) in GRID: ypos[q,r,tr_tmp] >= 0.9} {
+    printf "%s,%d,%d,%d,%d\n", i, o, tr_tmp, q, r >> "retrieve_points.csv";
+    break;
+  }
+}
+
+# ================== EXPORT s & f ==================
+printf "drone op t q r\n" > "s.txt";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, t in TMSET} {
+  if s[i,o,q,r,t] >= 0.5 then
+    printf "%s %d %d %d %d\n", i, o, t, q, r >> "s.txt";
+}
+
+printf "drone op t q r\n" > "f.txt";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, t in TMSET} {
+  if f[i,o,q,r,t] >= 0.5 then
+    printf "%s %d %d %d %d\n", i, o, t, q, r >> "f.txt";
+}
+
+printf "Launch checks (s<=ypos)\n";
+for {i in DRONES, (q,r) in GRID, t in TMSET: s[i,2,q,r,t]=1}
+  printf "%s op=2 launch at (%d,%d) t=%d | ypos=%d\n", i,q,r,t, ypos[q,r,t];
+
+printf "Retrieve checks (f<=ypos)\n";
+for {i in DRONES, (q,r) in GRID, t in TMSET: f[i,2,q,r,t]=1}
+  printf "%s op=2 retrieve at (%d,%d) t=%d | ypos=%d\n", i,q,r,t, ypos[q,r,t];
+
+
+printf "\nPropagate (#15) mismatches:\n";
+for {i in DRONES, (q,r) in GRID, m in TDSET: m < TDmax} {
+  if z[i,2,q,r,m+1] != sum{(q1,r1) in GRID: (q1,r1,q,r) in ARCS} xarc[i,2,q1,r1,q,r,m] then
+    printf "%s (%d,%d) m=%d | LHS z=%d RHS in=%d\n",
+      i,q,r,m+1, z[i,2,q,r,m+1],
+      sum{(q1,r1) in GRID: (q1,r1,q,r) in ARCS} xarc[i,2,q1,r1,q,r,m];
+}
+
+printf "\nOutflow (#16) mismatches:\n";
+for {i in DRONES, (q,r) in GRID, m in TDSET: m < TDmax} {
+  if sum{(q2,r2) in GRID: (q,r,q2,r2) in ARCS} xarc[i,2,q,r,q2,r2,m]
+     != z[i,2,q,r,m] - x_end[i,2,m] then
+    printf "%s (%d,%d) m=%d | LHS out=%d RHS z-xend=%d\n",
+      i,q,r,m,
+      sum{(q2,r2) in GRID: (q,r,q2,r2) in ARCS} xarc[i,2,q,r,q2,r2,m],
+      z[i,2,q,r,m] - x_end[i,2,m];
+}
+
+printf "\nFinishLink_LB (#21) at end cells:\n";
+for {i in DRONES, (q,r) in GRID, m in TDSET: x_end[i,2,m]=1 and z[i,2,q,r,m]=1} {
+  printf "%s end at (%d,%d) m=%d | sum_t f=%d\n",
+    i,q,r,m, sum{t in TMSET} f[i,2,q,r,t];
+}
+
+# === 1) NoArcAtEnd check ===
+printf "== NoArcAtEnd violations ==\n";
+printf "i  o  (q1,r1)->(q2,r2)  m   LHS(xarc)   RHS(1-x_end)\n";
+for {i in DRONES, o in OPERATIONS, (q1,r1,q2,r2) in ARCS, m in TDSET: m < TDmax} {
+  if xarc[i,o,q1,r1,q2,r2,m] > 1 - x_end[i,o,m] + tol then
+    printf "%s  %d  (%d,%d)->(%d,%d)  %d    %g         %g\n",
+           i, o, q1,r1,q2,r2, m,
+           xarc[i,o,q1,r1,q2,r2,m], 1 - x_end[i,o,m];
+}
+
+printf "== NoArcAtEnd tight (m = m_end, semua xarc=0) ==\n";
+printf "i  o  m_end  any_xarc_out?\n";
+for {i in DRONES, o in OPERATIONS, m in TDSET: x_end[i,o,m]=1 and m < TDmax} {
+  printf "%s  %d  %d      %d\n",
+         i, o, m,
+         (if (sum{(q1,r1,q2,r2) in ARCS} xarc[i,o,q1,r1,q2,r2,m] > tol)
+            then 1 else 0);
+}
+
+
+# === 2) OutflowUB: sum_out <= z ===
+printf "== OutflowUB violations (sum_out > z) ==\n";
+printf "i  o  (q,r)  m   sum_out   z\n";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, m in TDSET: m < TDmax} {
+  if sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m]
+       > z[i,o,q,r,m] + tol then
+    printf "%s  %d  (%d,%d)  %d    %g    %g\n",
+           i, o, q, r, m,
+           sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m],
+           z[i,o,q,r,m];
+}
+
+
+# === 3) OutflowLB: sum_out >= z - x_end ===
+printf "== OutflowLB violations (sum_out < z - x_end) ==\n";
+printf "i  o  (q,r)  m   sum_out   z-x_end\n";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, m in TDSET: m < TDmax} {
+  if sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m]
+       < z[i,o,q,r,m] - x_end[i,o,m] - tol then
+    printf "%s  %d  (%d,%d)  %d    %g    %g\n",
+           i, o, q, r, m,
+           sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m],
+           z[i,o,q,r,m] - x_end[i,o,m];
+}
+
+
+# === 4) End-step check (opsional) ===
+printf "== End-step check: sum_out at m_end should be 0 ==\n";
+printf "i  o  (q,r)  m_end  sum_out\n";
+for {i in DRONES, o in OPERATIONS, (q,r) in GRID, m in TDSET: x_end[i,o,m]=1 and m < TDmax} {
+  if sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m] > tol then
+    printf "%s  %d  (%d,%d)  %d     %g\n",
+           i, o, q, r, m,
+           sum{(q2,r2) in NEIGHBORS[q,r]} xarc[i,o,q,r,q2,r2,m];
+}
+
+printf "\n=== HEX step summary (weighted × 1.12) ===\n";
+
+param t_first;
+let t_first :=
+    sum{t in TMSET} t * m_arrive_t[t];
+
+printf "First arrival of mothership at dest: t_first = %d\n", t_first;
+
+printf "Mothership steps (big, t < t_first)    = %d\n",
+    sum{(q1,r1,q2,r2) in ARCS, t in TMSET: t < TM}
+        (if (t < t_first and yarc[q1,r1,q2,r2,t] > 0.5)
+         then 1 else 0);
+
+printf "Mothership weighted (×1.12, t < t_first) = %.2f\n",
+    1.12 *
+    sum{(q1,r1,q2,r2) in ARCS, t in TMSET: t < TM}
+        (if (t < t_first and yarc[q1,r1,q2,r2,t] > 0.5)
+         then 1 else 0);
+
+for {i in DRONES, o in OPERATIONS} {
+
+    printf "Drone %s, Op %d steps         = %d\n",
+        i, o,
+        sum{(q1,r1,q2,r2) in ARCS, m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0);
+
+    printf "Drone %s, Op %d weighted      = %.2f\n",
+        i, o,
+        1.12 *
+        sum{(q1,r1,q2,r2) in ARCS, m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0);
+}
+
+for {i in DRONES} {
+    printf "Drone %s TOTAL steps          = %d\n",
+        i,
+        sum{o in OPERATIONS,
+            (q1,r1,q2,r2) in ARCS,
+            m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0);
+
+    printf "Drone %s TOTAL weighted       = %.2f\n",
+        i,
+        1.12 *
+        sum{o in OPERATIONS,
+            (q1,r1,q2,r2) in ARCS,
+            m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0);
+}
+
+printf "TOTAL weighted (drones) = %.2f\n",
+    1.12 * (
+        sum{i in DRONES, o in OPERATIONS,
+            (q1,r1,q2,r2) in ARCS,
+            m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0)
+    );
+printf "-------------------------------------------------\n";
+
+printf "Grand TOTAL weighted (M to t_first + drones) = %.2f\n",
+    1.12 * (
+        sum{(q1,r1,q2,r2) in ARCS, t in TMSET: t < TM}
+            (if (t < t_first and yarc[q1,r1,q2,r2,t] > 0.5)
+             then 1 else 0)
+      +
+        sum{i in DRONES, o in OPERATIONS,
+            (q1,r1,q2,r2) in ARCS,
+            m in TDSET: m < TDmax}
+            (if xarc[i,o,q1,r1,q2,r2,m] > 0.5 then 1 else 0)
+    );
+printf "-------------------------------------------------\n";
+
+display t_l["Drone2",2], t_r["Drone2",2], t_end["Drone2",2];
+display (t_r["Drone2",2] - t_l["Drone2",2]) * Delta_m,
+        t_end["Drone2",2] * Delta_u["Drone2"];
+display Total_Cost;
+
+printf "MOTHERSHIP ROUTE (BIG GRID):\n";
+for {t in TMSET} {
+  for {(q,r) in GRID: ypos[q,r,t] = 1} {
+    printf "t=%d : (%d,%d)\n", t, q, r;
+  }
+}
+

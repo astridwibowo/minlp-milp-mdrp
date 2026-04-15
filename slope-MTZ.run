@@ -1,0 +1,56 @@
+#RESERT THE AMPL ENVIROMENT
+reset;
+reset option;
+
+#LOAD THE MODEL
+model slope-MTZ.mod;
+
+#LOAD THE DATA
+data slope-MTZv2.dat;
+option show_stats 1;
+
+#CHANGE THE SOLVER
+option solver gurobi;
+option gurobi_options 'outlev=1 timelim=3600';
+#option solver baron;
+#option baron_options "outlev=1 prtime=10 prfreq=1 prloc=1 threads=4 maxtime=3600";
+
+#SOLVE
+solve;
+
+#SHOW RESULT
+display TotalOperationalCost;
+display x_sj;
+display x_j;
+display x_jk;
+display x_jf;
+display d_u;
+display p_k;
+display d_sj;
+display A_ji;
+display d_jf;
+display d_u;
+display Du_max;
+display d_origin;
+display d_LR;
+display d_RL;
+display XL_x, XL_y, XR_x, XR_y;
+display omega_m, omega_u, omega_p;
+display Vm, Vu;
+display x_sj > x_sjSMTZ.txt;  
+display x_jk > x_jkSMTZ.txt;  
+display x_jf > x_jfSMTZ.txt;  
+display A_ji > ASMTZ.txt;
+display XL_x > XL_xSMTZ.txt;
+display XL_y > XL_ySMTZ.txt;
+display XR_x > XR_xSMTZ.txt;
+display XR_y > XR_ySMTZ.txt;
+display slope;
+display h;
+
+
+
+
+
+
+   

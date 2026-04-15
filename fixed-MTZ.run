@@ -1,0 +1,55 @@
+#RESERT THE AMPL ENVIROMENT
+reset;
+
+#LOAD THE MODEL
+model fixed-MTZ.mod;
+
+#LOAD THE DATA
+data slope-MTZv2.dat;
+option show_stats 1;
+
+#CHANGE THE SOLVER
+option solver gurobi;
+option gurobi_options 'outlev=1 timelim=3600';
+#option solver baron;
+#option baron_options "outlev=1 prtime=10 prfreq=1 prloc=1 threads=4 maxtime=3600";
+
+
+
+#SOLVE
+solve;
+#display _conname, _con;
+
+#SHOW RESULT
+display TotalOperationalCost;
+display x_sj;
+display x_j;
+display x_jk;
+display x_jf;
+display d_u;
+display p_k;
+display d_sj;
+display A_ji;
+display d_jf;
+display d_u;
+display Du_max;
+display d_origin, d_dest;
+display d_LR;
+display d_RL;
+display XL_x, XL_y, XR_x, XR_y;
+display omega_m, omega_u, omega_p;
+
+printf "\n===== OPERATION USAGE (Symmetry Breaking Check) =====\n";
+display u;
+
+display x_sj > x_sjFMTZ.txt;  
+display x_jk > x_jkFMTZ.txt;  
+display x_jf > x_jfFMTZ.txt;  
+display A_ji > A_jiFMTZ.txt;
+display XL_x > XL_xFMTZ.txt;
+display XL_y > XL_yFMTZ.txt;
+display XR_x > XR_xFMTZ.txt;
+display XR_y > XR_yFMTZ.txt;
+
+
+   
